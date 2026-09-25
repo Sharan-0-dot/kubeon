@@ -1,0 +1,9 @@
+spring:
+  application:
+    name: kubeon
+
+  management:
+    endpoints:
+      web:
+        exposure:
+          include: health,info
