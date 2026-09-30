@@ -15,8 +15,6 @@ import org.springframework.stereotype.Component;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 
 @Component
 public class PodWatcher {
@@ -24,11 +22,12 @@ public class PodWatcher {
     private static final Logger log = LoggerFactory.getLogger(PodWatcher.class);
 
     private final KubernetesClient client;
-    private final Set<String> reported = ConcurrentHashMap.newKeySet();
+    private final IssueDeduplicator deduplicator;
     private Watch watch;
 
-    public PodWatcher(KubernetesClient client) {
+    public PodWatcher(KubernetesClient client, IssueDeduplicator deduplicator) {
         this.client = client;
+        this.deduplicator = deduplicator;
     }
 
     @PostConstruct
@@ -53,32 +52,48 @@ public class PodWatcher {
     }
 
     private void handle(Watcher.Action action, Pod pod) {
+        if (pod == null || pod.getMetadata() == null) return;
+
         String ns = pod.getMetadata().getNamespace();
         String name = pod.getMetadata().getName();
 
         if (action == Watcher.Action.DELETED) {
-            reported.removeIf(k -> k.startsWith(ns + "/" + name + "/"));
+            deduplicator.clear(ns, name);
             return;
         }
 
         detect(pod).forEach(issue -> {
-            String key = ns + "/" + name + "/" + issue.reason();
-            if (reported.add(key)) {
-                log.warn("DETECTED: {}", issue);
+            if (deduplicator.isNew(ns, name, issue.reason())) {
+                log.warn("DETECTED (Pod): {}", issue);
             }
         });
     }
 
     private List<DetectedIssue> detect(Pod pod) {
         List<DetectedIssue> issues = new ArrayList<>();
-        var statuses = pod.getStatus() == null ? null : pod.getStatus().getContainerStatuses();
-        if (statuses == null) return issues;
+        if (pod.getStatus() == null) return issues;
+
+        inspectStatuses(pod, pod.getStatus().getContainerStatuses(), issues);
+        inspectStatuses(pod, pod.getStatus().getInitContainerStatuses(), issues);
+
+        return issues;
+    }
+
+    private void inspectStatuses(Pod pod, List<ContainerStatus> statuses, List<DetectedIssue> issues) {
+        if (statuses == null) return;
 
         for (ContainerStatus cs : statuses) {
-            if (cs.getState() != null && cs.getState().getWaiting() != null) {
-                var w = cs.getState().getWaiting();
-                BadStateReason.fromK8sReason(w.getReason())
-                        .ifPresent(r -> issues.add(build(pod, r, w.getMessage())));
+            if (cs.getState() != null) {
+                if (cs.getState().getWaiting() != null) {
+                    var w = cs.getState().getWaiting();
+                    BadStateReason.fromK8sReason(w.getReason())
+                            .ifPresent(r -> issues.add(build(pod, r, w.getMessage())));
+                }
+                if (cs.getState().getTerminated() != null) {
+                    var t = cs.getState().getTerminated();
+                    BadStateReason.fromK8sReason(t.getReason())
+                            .ifPresent(r -> issues.add(build(pod, r, t.getMessage())));
+                }
             }
             if (cs.getLastState() != null && cs.getLastState().getTerminated() != null) {
                 var t = cs.getLastState().getTerminated();
@@ -86,7 +101,6 @@ public class PodWatcher {
                         .ifPresent(r -> issues.add(build(pod, r, t.getMessage())));
             }
         }
-        return issues;
     }
 
     private DetectedIssue build(Pod pod, BadStateReason reason, String message) {
