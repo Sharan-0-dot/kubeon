@@ -13,4 +13,8 @@ public class KubernetesClientConfig {
         return new KubernetesClientBuilder().build();
     }
 
+    @Bean
+    public com.fasterxml.jackson.databind.ObjectMapper objectMapper() {
+        return new com.fasterxml.jackson.databind.ObjectMapper().findAndRegisterModules();
+    }
 }

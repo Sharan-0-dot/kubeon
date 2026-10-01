@@ -17,6 +17,7 @@ import org.springframework.stereotype.Component;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import com.sharan.kubeon.kubernetes.evidence.EvidenceCollector;
 import java.util.List;
 
 @Component
@@ -26,11 +27,13 @@ public class PodWatcher {
 
     private final KubernetesClient client;
     private final IssueDeduplicator deduplicator;
+    private final EvidenceCollector evidenceCollector;
     private Watch watch;
 
-    public PodWatcher(KubernetesClient client, IssueDeduplicator deduplicator) {
+    public PodWatcher(KubernetesClient client, IssueDeduplicator deduplicator, EvidenceCollector evidenceCollector) {
         this.client = client;
         this.deduplicator = deduplicator;
+        this.evidenceCollector = evidenceCollector;
     }
 
     @PostConstruct
@@ -68,6 +71,7 @@ public class PodWatcher {
         detect(pod).forEach(issue -> {
             if (deduplicator.isNew(ns, name, issue.reason())) {
                 log.warn("DETECTED (Pod): {}", issue);
+                evidenceCollector.collect(issue);
             }
         });
     }

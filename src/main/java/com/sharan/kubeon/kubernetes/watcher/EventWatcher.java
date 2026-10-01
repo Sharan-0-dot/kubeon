@@ -16,6 +16,8 @@ import org.springframework.stereotype.Component;
 
 import java.time.Instant;
 
+import com.sharan.kubeon.kubernetes.evidence.EvidenceCollector;
+
 @Component
 public class EventWatcher {
 
@@ -23,11 +25,13 @@ public class EventWatcher {
 
     private final KubernetesClient client;
     private final IssueDeduplicator deduplicator;
+    private final EvidenceCollector evidenceCollector;
     private Watch watch;
 
-    public EventWatcher(KubernetesClient client, IssueDeduplicator deduplicator) {
+    public EventWatcher(KubernetesClient client, IssueDeduplicator deduplicator, EvidenceCollector evidenceCollector) {
         this.client = client;
         this.deduplicator = deduplicator;
+        this.evidenceCollector = evidenceCollector;
     }
 
     @PostConstruct
@@ -91,6 +95,7 @@ public class EventWatcher {
                         event.getMessage()
                 );
                 log.warn("DETECTED (Event): {}", issue);
+                evidenceCollector.collect(issue);
             }
         }
     }
