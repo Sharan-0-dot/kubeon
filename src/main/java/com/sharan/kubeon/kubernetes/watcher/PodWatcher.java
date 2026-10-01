@@ -1,5 +1,8 @@
-package com.sharan.kubeon;
+package com.sharan.kubeon.kubernetes.watcher;
 
+import com.sharan.kubeon.detection.BadStateReason;
+import com.sharan.kubeon.detection.DetectedIssue;
+import com.sharan.kubeon.detection.IssueDeduplicator;
 import io.fabric8.kubernetes.api.model.ContainerStatus;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.client.KubernetesClient;

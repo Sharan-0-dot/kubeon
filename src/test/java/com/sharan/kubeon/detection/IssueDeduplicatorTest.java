@@ -1,4 +1,4 @@
-package com.sharan.kubeon;
+package com.sharan.kubeon.detection;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

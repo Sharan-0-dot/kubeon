@@ -1,4 +1,4 @@
-package com.sharan.kubeon;
+package com.sharan.kubeon.kubernetes;
 
 import io.fabric8.kubernetes.client.KubernetesClient;
 import org.springframework.boot.CommandLineRunner;
