@@ -7,3 +7,10 @@ spring:
       web:
         exposure:
           include: health,info
+
+kubeon:
+  gemini:
+    api-key: ${GEMINI_API_KEY:}
+    model: ${GEMINI_MODEL:gemini-2.0-flash}
+    temperature: 0.1
+    timeout-seconds: 30

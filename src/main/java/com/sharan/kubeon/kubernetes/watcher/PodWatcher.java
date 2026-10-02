@@ -17,7 +17,9 @@ import org.springframework.stereotype.Component;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import com.sharan.kubeon.kubernetes.evidence.EvidenceBundle;
 import com.sharan.kubeon.kubernetes.evidence.EvidenceCollector;
+import com.sharan.kubeon.reasoning.ReasoningAgent;
 import java.util.List;
 
 @Component
@@ -28,12 +30,17 @@ public class PodWatcher {
     private final KubernetesClient client;
     private final IssueDeduplicator deduplicator;
     private final EvidenceCollector evidenceCollector;
+    private final ReasoningAgent reasoningAgent;
     private Watch watch;
 
-    public PodWatcher(KubernetesClient client, IssueDeduplicator deduplicator, EvidenceCollector evidenceCollector) {
+    public PodWatcher(KubernetesClient client,
+                      IssueDeduplicator deduplicator,
+                      EvidenceCollector evidenceCollector,
+                      ReasoningAgent reasoningAgent) {
         this.client = client;
         this.deduplicator = deduplicator;
         this.evidenceCollector = evidenceCollector;
+        this.reasoningAgent = reasoningAgent;
     }
 
     @PostConstruct
@@ -71,7 +78,12 @@ public class PodWatcher {
         detect(pod).forEach(issue -> {
             if (deduplicator.isNew(ns, name, issue.reason())) {
                 log.warn("DETECTED (Pod): {}", issue);
-                evidenceCollector.collect(issue);
+                try {
+                    EvidenceBundle bundle = evidenceCollector.collect(issue);
+                    reasoningAgent.diagnose(bundle);
+                } catch (Exception e) {
+                    log.error("Error diagnosing issue in {}/{}: {}", ns, name, e.getMessage());
+                }
             }
         });
     }

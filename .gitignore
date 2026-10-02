@@ -33,3 +33,5 @@ build/
 .vscode/
 project-plan.md
 PROJECT_PROGRESS.md
+
+.env

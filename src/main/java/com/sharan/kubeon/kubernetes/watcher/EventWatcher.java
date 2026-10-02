@@ -16,7 +16,9 @@ import org.springframework.stereotype.Component;
 
 import java.time.Instant;
 
+import com.sharan.kubeon.kubernetes.evidence.EvidenceBundle;
 import com.sharan.kubeon.kubernetes.evidence.EvidenceCollector;
+import com.sharan.kubeon.reasoning.ReasoningAgent;
 
 @Component
 public class EventWatcher {
@@ -26,12 +28,17 @@ public class EventWatcher {
     private final KubernetesClient client;
     private final IssueDeduplicator deduplicator;
     private final EvidenceCollector evidenceCollector;
+    private final ReasoningAgent reasoningAgent;
     private Watch watch;
 
-    public EventWatcher(KubernetesClient client, IssueDeduplicator deduplicator, EvidenceCollector evidenceCollector) {
+    public EventWatcher(KubernetesClient client,
+                        IssueDeduplicator deduplicator,
+                        EvidenceCollector evidenceCollector,
+                        ReasoningAgent reasoningAgent) {
         this.client = client;
         this.deduplicator = deduplicator;
         this.evidenceCollector = evidenceCollector;
+        this.reasoningAgent = reasoningAgent;
     }
 
     @PostConstruct
@@ -95,7 +102,12 @@ public class EventWatcher {
                         event.getMessage()
                 );
                 log.warn("DETECTED (Event): {}", issue);
-                evidenceCollector.collect(issue);
+                try {
+                    EvidenceBundle bundle = evidenceCollector.collect(issue);
+                    reasoningAgent.diagnose(bundle);
+                } catch (Exception e) {
+                    log.error("Error diagnosing event issue in {}/{}: {}", ns, name, e.getMessage());
+                }
             }
         }
     }
