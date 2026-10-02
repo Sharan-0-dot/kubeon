@@ -3,6 +3,7 @@ package com.sharan.kubeon.kubernetes.watcher;
 import com.sharan.kubeon.detection.BadStateReason;
 import com.sharan.kubeon.detection.DetectedIssue;
 import com.sharan.kubeon.detection.IssueDeduplicator;
+import com.sharan.kubeon.incident.service.IncidentService;
 import io.fabric8.kubernetes.api.model.ContainerStatus;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.client.KubernetesClient;
@@ -13,13 +14,12 @@ import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
 import java.util.ArrayList;
-import com.sharan.kubeon.kubernetes.evidence.EvidenceBundle;
-import com.sharan.kubeon.kubernetes.evidence.EvidenceCollector;
-import com.sharan.kubeon.reasoning.ReasoningAgent;
 import java.util.List;
 
 @Component
@@ -29,22 +29,26 @@ public class PodWatcher {
 
     private final KubernetesClient client;
     private final IssueDeduplicator deduplicator;
-    private final EvidenceCollector evidenceCollector;
-    private final ReasoningAgent reasoningAgent;
+    private final IncidentService incidentService;
     private Watch watch;
+
+    @Value("${kubeon.watcher.enabled:true}")
+    private boolean watcherEnabled;
 
     public PodWatcher(KubernetesClient client,
                       IssueDeduplicator deduplicator,
-                      EvidenceCollector evidenceCollector,
-                      ReasoningAgent reasoningAgent) {
+                      @Lazy IncidentService incidentService) {
         this.client = client;
         this.deduplicator = deduplicator;
-        this.evidenceCollector = evidenceCollector;
-        this.reasoningAgent = reasoningAgent;
+        this.incidentService = incidentService;
     }
 
     @PostConstruct
     public void start() {
+        if (!watcherEnabled) {
+            log.info("PodWatcher background watch is disabled by configuration");
+            return;
+        }
         watch = client.pods().inAnyNamespace().watch(new Watcher<Pod>() {
             @Override
             public void eventReceived(Action action, Pod pod) {
@@ -79,18 +83,17 @@ public class PodWatcher {
             if (deduplicator.isNew(ns, name, issue.reason())) {
                 log.warn("DETECTED (Pod): {}", issue);
                 try {
-                    EvidenceBundle bundle = evidenceCollector.collect(issue);
-                    reasoningAgent.diagnose(bundle);
+                    incidentService.processDetectedIssue(issue);
                 } catch (Exception e) {
-                    log.error("Error diagnosing issue in {}/{}: {}", ns, name, e.getMessage());
+                    log.error("Error processing incident for {}/{}: {}", ns, name, e.getMessage());
                 }
             }
         });
     }
 
-    private List<DetectedIssue> detect(Pod pod) {
+    public List<DetectedIssue> detect(Pod pod) {
         List<DetectedIssue> issues = new ArrayList<>();
-        if (pod.getStatus() == null) return issues;
+        if (pod == null || pod.getStatus() == null) return issues;
 
         inspectStatuses(pod, pod.getStatus().getContainerStatuses(), issues);
         inspectStatuses(pod, pod.getStatus().getInitContainerStatuses(), issues);

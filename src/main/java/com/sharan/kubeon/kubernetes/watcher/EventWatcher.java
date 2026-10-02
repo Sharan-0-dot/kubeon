@@ -3,6 +3,7 @@ package com.sharan.kubeon.kubernetes.watcher;
 import com.sharan.kubeon.detection.BadStateReason;
 import com.sharan.kubeon.detection.DetectedIssue;
 import com.sharan.kubeon.detection.IssueDeduplicator;
+import com.sharan.kubeon.incident.service.IncidentService;
 import io.fabric8.kubernetes.api.model.Event;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.Watch;
@@ -12,13 +13,11 @@ import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
-
-import com.sharan.kubeon.kubernetes.evidence.EvidenceBundle;
-import com.sharan.kubeon.kubernetes.evidence.EvidenceCollector;
-import com.sharan.kubeon.reasoning.ReasoningAgent;
 
 @Component
 public class EventWatcher {
@@ -27,22 +26,26 @@ public class EventWatcher {
 
     private final KubernetesClient client;
     private final IssueDeduplicator deduplicator;
-    private final EvidenceCollector evidenceCollector;
-    private final ReasoningAgent reasoningAgent;
+    private final IncidentService incidentService;
     private Watch watch;
+
+    @Value("${kubeon.watcher.enabled:true}")
+    private boolean watcherEnabled;
 
     public EventWatcher(KubernetesClient client,
                         IssueDeduplicator deduplicator,
-                        EvidenceCollector evidenceCollector,
-                        ReasoningAgent reasoningAgent) {
+                        @Lazy IncidentService incidentService) {
         this.client = client;
         this.deduplicator = deduplicator;
-        this.evidenceCollector = evidenceCollector;
-        this.reasoningAgent = reasoningAgent;
+        this.incidentService = incidentService;
     }
 
     @PostConstruct
     public void start() {
+        if (!watcherEnabled) {
+            log.info("EventWatcher background watch is disabled by configuration");
+            return;
+        }
         watch = client.v1().events().inAnyNamespace().watch(new Watcher<Event>() {
             @Override
             public void eventReceived(Action action, Event event) {
@@ -103,10 +106,9 @@ public class EventWatcher {
                 );
                 log.warn("DETECTED (Event): {}", issue);
                 try {
-                    EvidenceBundle bundle = evidenceCollector.collect(issue);
-                    reasoningAgent.diagnose(bundle);
+                    incidentService.processDetectedIssue(issue);
                 } catch (Exception e) {
-                    log.error("Error diagnosing event issue in {}/{}: {}", ns, name, e.getMessage());
+                    log.error("Error processing incident for event in {}/{}: {}", ns, name, e.getMessage());
                 }
             }
         }

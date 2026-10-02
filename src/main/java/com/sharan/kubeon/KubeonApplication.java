@@ -12,8 +12,11 @@ import java.util.List;
 @SpringBootApplication
 public class KubeonApplication {
 
-	public static void main(String[] args) {
+	static {
 		loadDotEnv();
+	}
+
+	public static void main(String[] args) {
 		SpringApplication.run(KubeonApplication.class, args);
 	}
 
