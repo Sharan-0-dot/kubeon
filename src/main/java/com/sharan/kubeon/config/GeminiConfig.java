@@ -20,7 +20,7 @@ public class GeminiConfig {
     @Value("${kubeon.gemini.api-key:${GEMINI_API_KEY:}}")
     private String apiKey;
 
-    @Value("${kubeon.gemini.model:${GEMINI_MODEL:gemini-2.0-flash}}")
+    @Value("${kubeon.gemini.model:${GEMINI_MODEL:gemini-2.5-flash}}")
     private String modelName;
 
     @Value("${kubeon.gemini.temperature:0.1}")
