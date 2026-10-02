@@ -14,3 +14,5 @@ kubeon:
     model: ${GEMINI_MODEL:gemini-2.0-flash}
     temperature: 0.1
     timeout-seconds: 30
+  reasoning:
+    max-tool-calls: ${MAX_TOOL_CALLS:3}

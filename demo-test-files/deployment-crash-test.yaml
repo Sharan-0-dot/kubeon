@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crash-deployment
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: crash-app
+  template:
+    metadata:
+      labels:
+        app: crash-app
+    spec:
+      containers:
+        - name: web
+          image: busybox
+          command: ["sh", "-c", "echo 'Application starting...'; sleep 2; echo 'Fatal database connection failure: connection refused on port 5432'; exit 1"]

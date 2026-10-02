@@ -1,7 +1,6 @@
 package com.sharan.kubeon.config;
 
 import dev.langchain4j.model.chat.ChatModel;
-import dev.langchain4j.model.chat.request.ResponseFormat;
 import dev.langchain4j.model.googleai.GoogleAiGeminiChatModel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,7 +37,6 @@ public class GeminiConfig {
                 .modelName(modelName.trim())
                 .temperature(temperature)
                 .timeout(Duration.ofSeconds(timeoutSeconds))
-                .responseFormat(ResponseFormat.JSON)
                 .build();
     }
 
