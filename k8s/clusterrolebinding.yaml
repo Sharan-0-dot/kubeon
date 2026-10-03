@@ -1,0 +1,14 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kubeon-readonly-binding
+  labels:
+    app.kubernetes.io/name: kubeon
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kubeon-readonly
+subjects:
+  - kind: ServiceAccount
+    name: kubeon
+    namespace: kubeon

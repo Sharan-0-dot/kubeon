@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kubeon-config
+  namespace: kubeon
+  labels:
+    app.kubernetes.io/name: kubeon
+data:
+  GEMINI_MODEL: "gemini-2.5-flash"
+  MAX_TOOL_CALLS: "3"
+  REDACTION_ENABLED: "true"

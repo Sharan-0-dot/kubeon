@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kubeon
+  labels:
+    app.kubernetes.io/name: kubeon
+    app.kubernetes.io/part-of: kubeon

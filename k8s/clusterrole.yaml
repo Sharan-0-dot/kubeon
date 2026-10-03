@@ -1,0 +1,15 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubeon-readonly
+  labels:
+    app.kubernetes.io/name: kubeon
+rules:
+  # Core API: pods, pod logs, events — read-only
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "events"]
+    verbs: ["get", "list", "watch"]
+  # Apps API: deployments — read-only (for rollout info tool)
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list"]
