@@ -32,3 +32,5 @@ kubeon:
     notify-on-manual: false
   redaction:
     enabled: ${REDACTION_ENABLED:true}
+  connectivity-check:
+    enabled: ${CONNECTIVITY_CHECK_ENABLED:true}

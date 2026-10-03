@@ -2,9 +2,11 @@ package com.sharan.kubeon.kubernetes;
 
 import io.fabric8.kubernetes.client.KubernetesClient;
 import org.springframework.boot.CommandLineRunner;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 @Component
+@ConditionalOnProperty(name = "kubeon.connectivity-check.enabled", havingValue = "true", matchIfMissing = true)
 public class ClusterConnectivityCheck implements CommandLineRunner {
 
     private final KubernetesClient client;
