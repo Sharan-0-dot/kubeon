@@ -30,3 +30,5 @@ kubeon:
   slack:
     webhook-url: ${SLACK_WEBHOOK_URL:}
     notify-on-manual: false
+  redaction:
+    enabled: ${REDACTION_ENABLED:true}

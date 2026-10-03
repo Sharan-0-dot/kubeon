@@ -10,6 +10,7 @@ import com.sharan.kubeon.incident.model.TriggerType;
 import com.sharan.kubeon.incident.repository.IncidentRepository;
 import com.sharan.kubeon.kubernetes.evidence.EvidenceBundle;
 import com.sharan.kubeon.kubernetes.evidence.EvidenceCollector;
+import com.sharan.kubeon.kubernetes.evidence.LogSnapshot;
 import com.sharan.kubeon.kubernetes.watcher.PodWatcher;
 import com.sharan.kubeon.notification.SlackNotifier;
 import com.sharan.kubeon.reasoning.ConfidenceLevel;
@@ -26,6 +27,7 @@ import io.fabric8.kubernetes.client.dsl.PodResource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
@@ -208,5 +210,58 @@ class IncidentServiceTest {
         assertThat(service.getIncident(id)).contains(incident);
         assertThat(service.listIncidents(null)).containsExactly(incident);
         assertThat(service.listIncidents("default")).containsExactly(incident);
+    }
+
+    @Test
+    void testProcessDetectedIssueSanitizesEvidenceBeforePersistenceAndReasoning() {
+        DetectedIssue rawIssue = new DetectedIssue(
+                "default",
+                "secret-pod",
+                BadStateReason.CRASH_LOOP_BACKOFF,
+                Instant.now(),
+                "Crashed with DB_PASSWORD=mySecretPassword123"
+        );
+
+        LogSnapshot rawLog = new LogSnapshot(
+                "app",
+                false,
+                "Authorization: Bearer superSecretToken456\nDatabase URI: postgres://usr:pass999@pg:5432/db",
+                false,
+                null
+        );
+
+        EvidenceBundle rawBundle = new EvidenceBundle(
+                rawIssue,
+                null,
+                List.of(),
+                List.of(rawLog),
+                Instant.now()
+        );
+
+        when(evidenceCollector.collect(any(DetectedIssue.class))).thenReturn(rawBundle);
+
+        Diagnosis dummyDiagnosis = new Diagnosis("Sanitized diagnosis", ConfidenceLevel.HIGH, "Fix", List.of(), "model");
+        when(reasoningAgent.diagnose(any(EvidenceBundle.class))).thenReturn(dummyDiagnosis);
+        when(repository.save(any(Incident.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        Incident incident = service.processDetectedIssue(rawIssue);
+
+        assertThat(incident).isNotNull();
+        // Check that persisted issue in incident is sanitized
+        assertThat(incident.issue().sourceMessage()).isEqualTo("Crashed with DB_PASSWORD=[REDACTED]");
+        assertThat(incident.issue().sourceMessage()).doesNotContain("mySecretPassword123");
+
+        // Check that persisted evidence in incident is sanitized
+        assertThat(incident.evidence()).isNotNull();
+        String sanitizedLog = incident.evidence().logs().get(0).logContent();
+        assertThat(sanitizedLog).doesNotContain("superSecretToken456");
+        assertThat(sanitizedLog).doesNotContain("pass999");
+        assertThat(sanitizedLog).contains("Authorization: Bearer [REDACTED]");
+        assertThat(sanitizedLog).contains("postgres://usr:[REDACTED]@pg:5432/db");
+
+        // Check that reasoning agent was invoked with sanitized bundle
+        ArgumentCaptor<EvidenceBundle> bundleCaptor = ArgumentCaptor.forClass(EvidenceBundle.class);
+        verify(reasoningAgent).diagnose(bundleCaptor.capture());
+        assertThat(bundleCaptor.getValue().logs().get(0).logContent()).doesNotContain("superSecretToken456");
     }
 }

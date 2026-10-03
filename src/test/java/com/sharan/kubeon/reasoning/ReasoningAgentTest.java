@@ -271,4 +271,83 @@ class ReasoningAgentTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("GEMINI_API_KEY");
     }
+
+    @Test
+    void testDiagnoseSanitizesEvidenceBundleBeforeSendingToLlm() {
+        ArgumentCaptor<ChatRequest> requestCaptor = ArgumentCaptor.forClass(ChatRequest.class);
+
+        String diagnosisJson = """
+                {
+                  "rootCauseHypothesis": "Container crashed on database connect",
+                  "confidence": "HIGH",
+                  "suggestedFix": "Check configuration"
+                }
+                """;
+        ChatResponse response = ChatResponse.builder()
+                .aiMessage(AiMessage.from(diagnosisJson))
+                .build();
+        when(chatModel.chat(requestCaptor.capture())).thenReturn(response);
+
+        EvidenceBundle rawBundle = createBundle(
+                BadStateReason.CRASH_LOOP_BACKOFF,
+                "secret-pod",
+                "Fatal error: DB_PASSWORD=\"superSecretPass123\" Authorization: Bearer fake_bearer_token_xyz"
+        );
+
+        Diagnosis diagnosis = agent.diagnose(rawBundle);
+
+        assertThat(diagnosis).isNotNull();
+        ChatRequest captured = requestCaptor.getValue();
+        UserMessage promptMessage = (UserMessage) captured.messages().get(0);
+        String promptText = promptMessage.singleText();
+
+        assertThat(promptText).doesNotContain("superSecretPass123");
+        assertThat(promptText).doesNotContain("fake_bearer_token_xyz");
+        assertThat(promptText).contains("DB_PASSWORD=\\\"[REDACTED]\\\"");
+        assertThat(promptText).contains("Authorization: Bearer [REDACTED]");
+    }
+
+    @Test
+    void testToolExecutionSanitizesOutputBeforeSendingBackToLlm() {
+        ToolExecutionRequest toolRequest = ToolExecutionRequest.builder()
+                .id("call-1")
+                .name("getContainerLogs")
+                .arguments("{\"namespace\":\"default\",\"podName\":\"app-pod\",\"containerName\":\"app\"}")
+                .build();
+
+        AiMessage toolCallAiMessage = AiMessage.from(List.of(toolRequest));
+        ChatResponse response1 = ChatResponse.builder().aiMessage(toolCallAiMessage).build();
+
+        String finalJson = """
+                {
+                  "rootCauseHypothesis": "Database auth failed",
+                  "confidence": "HIGH",
+                  "suggestedFix": "Update secret"
+                }
+                """;
+        ChatResponse response2 = ChatResponse.builder().aiMessage(AiMessage.from(finalJson)).build();
+
+        ArgumentCaptor<ChatRequest> requestCaptor = ArgumentCaptor.forClass(ChatRequest.class);
+        when(chatModel.chat(requestCaptor.capture())).thenReturn(response1, response2);
+
+        when(kubernetesEvidenceTools.getContainerLogs("default", "app-pod", "app", 100, false))
+                .thenReturn("Error connecting with password: leakedPassword123 and token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.fake_sig");
+
+        EvidenceBundle bundle = createBundle(BadStateReason.CRASH_LOOP_BACKOFF, "app-pod", "Crash");
+        Diagnosis diagnosis = agent.diagnose(bundle);
+
+        assertThat(diagnosis).isNotNull();
+        List<ChatRequest> capturedRequests = requestCaptor.getAllValues();
+        assertThat(capturedRequests).hasSize(2);
+
+        ChatRequest secondRequest = capturedRequests.get(1);
+        // The last message in the second request is the ToolExecutionResultMessage
+        dev.langchain4j.data.message.ToolExecutionResultMessage toolResult =
+                (dev.langchain4j.data.message.ToolExecutionResultMessage) secondRequest.messages().get(2);
+
+        assertThat(toolResult.text()).doesNotContain("leakedPassword123");
+        assertThat(toolResult.text()).doesNotContain("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9");
+        assertThat(toolResult.text()).contains("password: [REDACTED]");
+        assertThat(toolResult.text()).contains("token: [REDACTED]");
+    }
 }

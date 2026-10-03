@@ -15,10 +15,12 @@ import com.sharan.kubeon.notification.SlackNotifier;
 import com.sharan.kubeon.reasoning.ConfidenceLevel;
 import com.sharan.kubeon.reasoning.Diagnosis;
 import com.sharan.kubeon.reasoning.ReasoningAgent;
+import com.sharan.kubeon.security.SensitiveDataRedactor;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -38,6 +40,7 @@ public class IncidentService {
     private final SlackNotifier slackNotifier;
     private final KubernetesClient kubernetesClient;
     private final PodWatcher podWatcher;
+    private final SensitiveDataRedactor sensitiveDataRedactor;
 
     public IncidentService(IncidentRepository repository,
                            EvidenceCollector evidenceCollector,
@@ -45,22 +48,35 @@ public class IncidentService {
                            SlackNotifier slackNotifier,
                            KubernetesClient kubernetesClient,
                            PodWatcher podWatcher) {
+        this(repository, evidenceCollector, reasoningAgent, slackNotifier, kubernetesClient, podWatcher, new SensitiveDataRedactor(true));
+    }
+
+    @Autowired
+    public IncidentService(IncidentRepository repository,
+                           EvidenceCollector evidenceCollector,
+                           ReasoningAgent reasoningAgent,
+                           SlackNotifier slackNotifier,
+                           KubernetesClient kubernetesClient,
+                           PodWatcher podWatcher,
+                           @Autowired(required = false) SensitiveDataRedactor sensitiveDataRedactor) {
         this.repository = repository;
         this.evidenceCollector = evidenceCollector;
         this.reasoningAgent = reasoningAgent;
         this.slackNotifier = slackNotifier;
         this.kubernetesClient = kubernetesClient;
         this.podWatcher = podWatcher;
+        this.sensitiveDataRedactor = sensitiveDataRedactor != null ? sensitiveDataRedactor : new SensitiveDataRedactor(true);
     }
 
     public Incident processDetectedIssue(DetectedIssue issue) {
         log.info("Processing detected issue for {}/{} (reason: {})",
                 issue.namespace(), issue.podName(), issue.reason());
 
-        Incident incident = Incident.create(issue, TriggerType.AUTO_DETECTED);
+        DetectedIssue sanitizedIssue = sensitiveDataRedactor.redactIssue(issue);
+        Incident incident = Incident.create(sanitizedIssue, TriggerType.AUTO_DETECTED);
         incident = repository.save(incident);
 
-        return executeInvestigation(incident, issue);
+        return executeInvestigation(incident, sanitizedIssue);
     }
 
     public Incident investigate(String namespace, String podName) {
@@ -83,13 +99,14 @@ public class IncidentService {
         BadStateReason reason = issues.isEmpty() ? null : issues.get(0).reason();
         String message = issues.isEmpty() ? "Manual on-demand investigation" : issues.get(0).sourceMessage();
 
-        DetectedIssue issue = new DetectedIssue(
+        DetectedIssue rawIssue = new DetectedIssue(
                 namespace.trim(),
                 podName.trim(),
                 reason,
                 Instant.now(),
                 message
         );
+        DetectedIssue issue = sensitiveDataRedactor.redactIssue(rawIssue);
 
         Incident incident = Incident.create(issue, TriggerType.MANUAL);
         incident = repository.save(incident);
@@ -99,14 +116,15 @@ public class IncidentService {
 
     private Incident executeInvestigation(Incident incident, DetectedIssue issue) {
         try {
-            // 1. Evidence gathering
+            // 1. Evidence gathering & sensitive data redaction
             incident = incident.withStatus(IncidentStatus.INVESTIGATING);
-            EvidenceBundle bundle = evidenceCollector.collect(issue);
-            incident = incident.withEvidence(bundle, IncidentStatus.INVESTIGATING);
+            EvidenceBundle rawBundle = evidenceCollector.collect(issue);
+            EvidenceBundle sanitizedBundle = sensitiveDataRedactor.redact(rawBundle);
+            incident = incident.withEvidence(sanitizedBundle, IncidentStatus.INVESTIGATING);
             incident = repository.save(incident);
 
             // 2. LLM Reasoning
-            Diagnosis diagnosis = reasoningAgent.diagnose(bundle);
+            Diagnosis diagnosis = reasoningAgent.diagnose(sanitizedBundle);
             incident = incident.withDiagnosis(diagnosis, IncidentStatus.DIAGNOSED);
             incident = repository.save(incident);
 

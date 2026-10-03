@@ -2,8 +2,10 @@ package com.sharan.kubeon.notification;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sharan.kubeon.incident.model.Incident;
+import com.sharan.kubeon.security.SensitiveDataRedactor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -24,13 +26,23 @@ public class SlackNotifier {
     private final boolean notifyOnManual;
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
+    private final SensitiveDataRedactor sensitiveDataRedactor;
 
+    public SlackNotifier(String webhookUrl,
+                         boolean notifyOnManual,
+                         ObjectMapper objectMapper) {
+        this(webhookUrl, notifyOnManual, objectMapper, new SensitiveDataRedactor(true));
+    }
+
+    @Autowired
     public SlackNotifier(@Value("${kubeon.slack.webhook-url:${SLACK_WEBHOOK_URL:}}") String webhookUrl,
                          @Value("${kubeon.slack.notify-on-manual:false}") boolean notifyOnManual,
-                         ObjectMapper objectMapper) {
+                         ObjectMapper objectMapper,
+                         @Autowired(required = false) SensitiveDataRedactor sensitiveDataRedactor) {
         this.webhookUrl = webhookUrl != null ? webhookUrl.trim() : "";
         this.notifyOnManual = notifyOnManual;
         this.objectMapper = objectMapper;
+        this.sensitiveDataRedactor = sensitiveDataRedactor != null ? sensitiveDataRedactor : new SensitiveDataRedactor(true);
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(5))
                 .build();
@@ -48,8 +60,9 @@ public class SlackNotifier {
         }
 
         try {
-            String message = formatSlackMessage(incident);
-            Map<String, String> payload = Map.of("text", message);
+            String rawMessage = formatSlackMessage(incident);
+            String sanitizedMessage = sensitiveDataRedactor.redactText(rawMessage);
+            Map<String, String> payload = Map.of("text", sanitizedMessage);
             String jsonPayload = objectMapper.writeValueAsString(payload);
 
             HttpRequest request = HttpRequest.newBuilder()
@@ -75,7 +88,7 @@ public class SlackNotifier {
         }
     }
 
-    private String formatSlackMessage(Incident incident) {
+    String formatSlackMessage(Incident incident) {
         StringBuilder sb = new StringBuilder();
         sb.append(String.format("🚨 *Kubeon Incident Alert*\n"));
         sb.append(String.format("*Namespace:* `%s` | *Pod:* `%s`\n", incident.namespace(), incident.podName()));

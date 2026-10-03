@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sharan.kubeon.agent.tools.KubernetesEvidenceTools;
 import com.sharan.kubeon.kubernetes.evidence.EvidenceBundle;
+import com.sharan.kubeon.security.SensitiveDataRedactor;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.agent.tool.ToolSpecifications;
@@ -62,18 +63,30 @@ public class ReasoningAgent {
     private final ChatModel chatModel;
     private final ObjectMapper objectMapper;
     private final KubernetesEvidenceTools kubernetesEvidenceTools;
+    private final SensitiveDataRedactor sensitiveDataRedactor;
     private final String modelName;
     private final int maxToolCalls;
     private final List<ToolSpecification> toolSpecifications;
 
+    public ReasoningAgent(ChatModel chatModel,
+                          ObjectMapper objectMapper,
+                          KubernetesEvidenceTools kubernetesEvidenceTools,
+                          String modelName,
+                          int maxToolCalls) {
+        this(chatModel, objectMapper, kubernetesEvidenceTools, new SensitiveDataRedactor(true), modelName, maxToolCalls);
+    }
+
+    @Autowired
     public ReasoningAgent(@Autowired(required = false) ChatModel chatModel,
                           ObjectMapper objectMapper,
                           @Autowired(required = false) KubernetesEvidenceTools kubernetesEvidenceTools,
+                          @Autowired(required = false) SensitiveDataRedactor sensitiveDataRedactor,
                           @Value("${kubeon.gemini.model:${GEMINI_MODEL:gemini-2.0-flash}}") String modelName,
                           @Value("${kubeon.reasoning.max-tool-calls:3}") int maxToolCalls) {
         this.chatModel = chatModel;
         this.objectMapper = objectMapper;
         this.kubernetesEvidenceTools = kubernetesEvidenceTools;
+        this.sensitiveDataRedactor = sensitiveDataRedactor != null ? sensitiveDataRedactor : new SensitiveDataRedactor(true);
         this.modelName = modelName;
         this.maxToolCalls = maxToolCalls;
         this.toolSpecifications = kubernetesEvidenceTools != null
@@ -90,7 +103,8 @@ public class ReasoningAgent {
                 bundle.issue().namespace(), bundle.issue().podName(), bundle.issue().reason(), modelName);
 
         try {
-            String evidenceJson = objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(bundle);
+            EvidenceBundle sanitizedBundle = sensitiveDataRedactor.redact(bundle);
+            String evidenceJson = objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(sanitizedBundle);
             String prompt = String.format(PROMPT_TEMPLATE, evidenceJson);
 
             List<ChatMessage> messages = new ArrayList<>();
@@ -162,7 +176,7 @@ public class ReasoningAgent {
 
         try {
             JsonNode tree = objectMapper.readTree(argsJson != null && !argsJson.isBlank() ? argsJson : "{}");
-            return switch (toolName) {
+            String rawResult = switch (toolName) {
                 case "getPodDetails" -> {
                     String ns = tree.path("namespace").asText(null);
                     String pod = tree.path("podName").asText(null);
@@ -191,6 +205,7 @@ public class ReasoningAgent {
                 }
                 default -> "Error: Unknown tool '" + toolName + "'. Available tools: getPodDetails, getContainerLogs, getEvents, getDeploymentRolloutInfo.";
             };
+            return sensitiveDataRedactor.redactText(rawResult);
         } catch (Exception e) {
             log.error("Failed to dispatch tool {}: {}", toolName, e.getMessage());
             return "Tool execution error for " + toolName + ": " + e.getMessage();
