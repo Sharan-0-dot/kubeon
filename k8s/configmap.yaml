@@ -9,3 +9,4 @@ data:
   GEMINI_MODEL: "gemini-2.5-flash"
   MAX_TOOL_CALLS: "3"
   REDACTION_ENABLED: "true"
+  CONNECTIVITY_CHECK_ENABLED: "true"
