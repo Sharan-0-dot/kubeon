@@ -21,37 +21,37 @@ Kubeon is structured as a modular Spring Boot 4.1.1 service that acts as an auto
 ```mermaid
 flowchart TD
     subgraph K8S_CLUSTER["Kubernetes Cluster"]
-        K8S_WORKLOADS["Monitored Workloads (Pods & Deployments)"]
+        K8S_WORKLOADS["Monitored Workloads: Pods and Deployments"]
         K8S_API["Kubernetes API Server"]
     end
 
-    subgraph KUBEON["Kubeon (Spring Boot 4.1.1)"]
-        WATCHERS["Streaming Watchers (PodWatcher / EventWatcher)"]
-        EVIDENCE["Evidence Gathering & Redaction"]
-        REASONING["Reasoning Agent (LangChain4j)"]
-        TOOLS["Kubernetes Evidence Tools (Read-Only)"]
-        INCIDENT_MGR["Incident Service & Store"]
-        REST_API["REST API (/api/health, /api/incidents, /api/investigate)"]
+    subgraph KUBEON["Kubeon: Spring Boot 4.1.1"]
+        WATCHERS["Streaming Watchers: PodWatcher and EventWatcher"]
+        EVIDENCE["Evidence Gathering and Redaction"]
+        REASONING["Reasoning Agent: LangChain4j"]
+        TOOLS["Kubernetes Evidence Tools: Read-Only"]
+        INCIDENT_MGR["Incident Service and Store"]
+        REST_API["REST API: health, incidents, investigate"]
     end
 
     subgraph EXTERNAL["External Dependencies"]
-        GEMINI["Google Gemini API (gemini-2.5-flash)"]
+        GEMINI["Google Gemini API: gemini-2.5-flash"]
         POSTGRES[("PostgreSQL Database")]
-        SLACK["Slack (Incoming Webhook - Optional)"]
+        SLACK["Slack: Incoming Webhook - Optional"]
     end
 
-    K8S_WORKLOADS -.->|Status & Warning Events| K8S_API
+    K8S_WORKLOADS -.->|Status and Warning Events| K8S_API
     K8S_API -->|Streaming HTTP Watch| WATCHERS
     WATCHERS --> EVIDENCE
     EVIDENCE --> REASONING
-    REASONING <-->|Prompts & Diagnoses| GEMINI
+    REASONING <-->|Prompts and Diagnoses| GEMINI
     REASONING <-->|Follow-up Tool Calls| TOOLS
     TOOLS -->|Read-only Queries| K8S_API
     REASONING -->|Structured Diagnosis| INCIDENT_MGR
-    INCIDENT_MGR <-->|Persist & Query Incidents| POSTGRES
+    INCIDENT_MGR <-->|Persist and Query Incidents| POSTGRES
     INCIDENT_MGR -.->|Dispatch Triage Alert| SLACK
     INCIDENT_MGR <--> REST_API
-    OPERATOR["Cluster Operator / SRE"] <-->|HTTP / JSON| REST_API
+    OPERATOR["Cluster Operator / SRE"] <-->|HTTP REST| REST_API
 ```
 
 ### Component Roles
@@ -78,7 +78,7 @@ flowchart TD
     subgraph EVENT_INGESTION["1. Event Ingestion"]
         POD_OR_EVENT["Pod Status Change OR Warning Event"]
         WATCHER["PodWatcher / EventWatcher"]
-        CLASSIFY{"Map to BadStateReason<br/>(OOMKilled, CrashLoopBackOff, Unhealthy, etc.)"}
+        CLASSIFY{"Map to BadStateReason<br/>OOMKilled, CrashLoopBackOff, Unhealthy"}
     end
 
     subgraph DEDUP["2. Deduplication"]
@@ -89,7 +89,7 @@ flowchart TD
 
     subgraph COLLECTION["3. Deterministic Evidence Gathering"]
         COLLECTOR["EvidenceCollector"]
-        K8S_FETCH["Query Kubernetes API:<br/>• Pod Spec & Node Info<br/>• Resource Requests/Limits<br/>• Correlated Warning Events<br/>• Current & Previous Logs"]
+        K8S_FETCH["Query Kubernetes API:<br/>- Pod Spec and Node Info<br/>- Resource Requests and Limits<br/>- Correlated Warning Events<br/>- Current and Previous Logs"]
         EVIDENCE_BUNDLE["Assemble EvidenceBundle"]
     end
 
@@ -100,22 +100,23 @@ flowchart TD
 
     subgraph REASONING["5. AI Triage"]
         AGENT["ReasoningAgent"]
-        DIAGNOSIS["Diagnosis Record<br/>(Root Cause, Confidence, Suggested Fix)"]
+        DIAGNOSIS["Diagnosis Record<br/>Root Cause, Confidence, Suggested Fix"]
     end
 
     subgraph EGRESS["6. Persistence & Notification"]
         INCIDENT_SERVICE["IncidentService"]
-        PERSIST[("PostgreSQL<br/>(incidents table)")]
-        NOTIFY["SlackNotifier<br/>(Optional Webhook Alert)"]
+        PERSIST[("PostgreSQL<br/>incidents table")]
+        NOTIFY["SlackNotifier<br/>Optional Webhook Alert"]
     end
 
     POD_OR_EVENT --> WATCHER
     WATCHER --> CLASSIFY
     CLASSIFY --> DEDUP_CHECK
-    DEDUP_CHECK -- "Yes (Duplicate)" --> DROP
-    DEDUP_CHECK -- "No (New Issue)" --> DETECTED_ISSUE
+    DEDUP_CHECK -- Duplicate --> DROP
+    DEDUP_CHECK -- New Issue --> DETECTED_ISSUE
     DETECTED_ISSUE --> COLLECTOR
-    COLLECTOR <--> K8S_FETCH
+    COLLECTOR -->|Query Telemetry| K8S_FETCH
+    K8S_FETCH -->|Return Data| COLLECTOR
     COLLECTOR --> EVIDENCE_BUNDLE
     EVIDENCE_BUNDLE --> REDACTOR
     REDACTOR --> SANITIZED_BUNDLE
@@ -153,24 +154,24 @@ When initial evidence is incomplete or ambiguous, Gemini can autonomously reques
 
 ```mermaid
 flowchart TD
-    START["Sanitized EvidenceBundle"] --> INIT_PROMPT["Construct Initial System Prompt + Tool Specifications"]
+    START["Sanitized EvidenceBundle"] --> INIT_PROMPT["Construct Initial System Prompt and Tool Specifications"]
     INIT_PROMPT --> CALL_GEMINI["Send ChatRequest to Gemini"]
     
     CALL_GEMINI --> DECISION{"Does Gemini require additional evidence?"}
 
-    DECISION -- "No (Sufficient Evidence)" --> PARSE_JSON["Parse Structured JSON Diagnosis"]
-    PARSE_JSON --> FINAL_DIAGNOSIS["Final Diagnosis Record<br/>• Root Cause Hypothesis<br/>• Confidence Level (LOW / MEDIUM / HIGH)<br/>• Suggested Remediation Fix<br/>• Recorded Tool Execution Trace"]
+    DECISION -- Sufficient Evidence --> PARSE_JSON["Parse Structured JSON Diagnosis"]
+    PARSE_JSON --> FINAL_DIAGNOSIS["Final Diagnosis Record<br/>- Root Cause Hypothesis<br/>- Confidence Level: LOW, MEDIUM, HIGH<br/>- Suggested Remediation Fix<br/>- Recorded Tool Execution Trace"]
 
-    DECISION -- "Yes (Tool Call Request)" --> BUDGET_CHECK{"Current Tool Calls < MAX_TOOL_CALLS (3)?"}
+    DECISION -- Needs More Context --> BUDGET_CHECK{"Tool calls within budget?"}
 
-    BUDGET_CHECK -- "Budget Exceeded" --> FORCE_FINAL["Append Warning Message:<br/>'Investigation budget reached. Produce final diagnosis immediately.'"]
+    BUDGET_CHECK -- Limit Reached --> FORCE_FINAL["Append Warning Message:<br/>Investigation budget reached. Produce final diagnosis immediately."]
     FORCE_FINAL --> CALL_GEMINI
 
-    BUDGET_CHECK -- "Within Budget" --> DISPATCH["Dispatch to KubernetesEvidenceTools:<br/>• getPodDetails<br/>• getContainerLogs<br/>• getEvents<br/>• getDeploymentRolloutInfo"]
+    BUDGET_CHECK -- Within Budget --> DISPATCH["Dispatch to KubernetesEvidenceTools:<br/>- getPodDetails<br/>- getContainerLogs<br/>- getEvents<br/>- getDeploymentRolloutInfo"]
 
     DISPATCH --> K8S_QUERY["Execute Read-Only Call via Kubernetes API"]
     K8S_QUERY --> RAW_OUTPUT["Raw Tool Execution Result String"]
-    RAW_OUTPUT --> REDACT_TOOL["SensitiveDataRedactor.redactText()<br/>Sanitize dynamic tool output"]
+    RAW_OUTPUT --> REDACT_TOOL["SensitiveDataRedactor.redactText<br/>Sanitize dynamic tool output"]
     REDACT_TOOL --> RECORD_TRACE["Append Tool Name to Diagnosis.toolCallsUsed"]
     RECORD_TRACE --> APPEND_MSG["Append ToolExecutionResultMessage to Chat Conversation"]
     APPEND_MSG --> CALL_GEMINI
@@ -195,33 +196,33 @@ flowchart TD
     subgraph CLUSTER["Kubernetes Cluster"]
         subgraph NS["Namespace: kubeon"]
             SA["ServiceAccount: kubeon"]
-            CM["ConfigMap: kubeon-config<br/>(GEMINI_MODEL, MAX_TOOL_CALLS, REDACTION_ENABLED)"]
-            SEC["Secret: kubeon-secrets<br/>(GEMINI_API_KEY, DB_PASSWORD, DB_URL, SLACK_WEBHOOK_URL)"]
+            CM["ConfigMap: kubeon-config<br/>GEMINI_MODEL, MAX_TOOL_CALLS, REDACTION_ENABLED"]
+            SEC["Secret: kubeon-secrets<br/>GEMINI_API_KEY, DB_PASSWORD, DB_URL, SLACK_WEBHOOK_URL"]
             
-            subgraph POD["Pod: kubeon-xxxx (1 Replica)"]
-                CONT["Container: sharansc/kubeon:latest<br/>• Non-Root (appuser UID: 1000)<br/>• Drop ALL Linux Capabilities<br/>• Memory: 256Mi req / 512Mi lim<br/>• CPU: 250m req / 500m lim"]
-                PROBES["Health Probes<br/>• Liveness: /actuator/health (port 8080)<br/>• Readiness: /actuator/health (port 8080)"]
+            subgraph POD["Pod: kubeon-xxxx - 1 Replica"]
+                CONT["Container: sharansc/kubeon:latest<br/>- Non-Root appuser UID 1000<br/>- Drop ALL Linux Capabilities<br/>- Memory: 256Mi req / 512Mi lim<br/>- CPU: 250m req / 500m lim"]
+                PROBES["Health Probes<br/>- Liveness: /actuator/health:8080<br/>- Readiness: /actuator/health:8080"]
             end
             
-            SVC["Service: kubeon<br/>(ClusterIP: 8080)"]
+            SVC["Service: kubeon<br/>ClusterIP: 8080"]
         end
 
-        subgraph RBAC["Cluster-Wide RBAC (Strictly Read-Only)"]
-            CR["ClusterRole: kubeon-readonly<br/>• pods, pods/log, events: get, list, watch<br/>• deployments: get, list<br/>• (No write/patch/delete permissions)"]
+        subgraph RBAC["Cluster-Wide RBAC - Strictly Read-Only"]
+            CR["ClusterRole: kubeon-readonly<br/>- pods, pods/log, events: get, list, watch<br/>- deployments: get, list<br/>- No write, patch, or delete permissions"]
             CRB["ClusterRoleBinding: kubeon-readonly-binding"]
         end
 
         subgraph MONITORED["Monitored Workloads Across All Namespaces"]
-            W1["Namespace: default (Pods, Events)"]
-            W2["Namespace: production (Pods, Events)"]
-            W3["Namespace: staging (Pods, Events)"]
+            W1["Namespace: default - Pods, Events"]
+            W2["Namespace: production - Pods, Events"]
+            W3["Namespace: staging - Pods, Events"]
         end
     end
 
-    subgraph EXT["External Dependencies (Out of Cluster)"]
-        EXT_PG[("PostgreSQL Database<br/>(Cloud SQL / RDS / Managed PG)")]
-        EXT_GEMINI["Google Gemini API<br/>(https://generativelanguage.googleapis.com)"]
-        EXT_SLACK["Slack API<br/>(https://hooks.slack.com)"]
+    subgraph EXT["External Dependencies Out of Cluster"]
+        EXT_PG[("PostgreSQL Database<br/>Cloud SQL, RDS, Managed PG")]
+        EXT_GEMINI["Google Gemini API<br/>generativelanguage.googleapis.com"]
+        EXT_SLACK["Slack API<br/>hooks.slack.com"]
     end
 
     CRB --> CR
@@ -232,10 +233,10 @@ flowchart TD
     SVC --> POD
     CONT --> PROBES
     CONT -->|In-Cluster ServiceAccount Token| CR
-    CR -->|Streaming Watches & Read Queries| MONITORED
-    CONT -->|JDBC (TCP 5432)| EXT_PG
-    CONT -->|HTTPS (TCP 443)| EXT_GEMINI
-    CONT -.->|HTTPS (TCP 443)| EXT_SLACK
+    CR -->|Streaming Watches and Read Queries| MONITORED
+    CONT -->|PostgreSQL| EXT_PG
+    CONT -->|Gemini API| EXT_GEMINI
+    CONT -.->|Slack Webhook| EXT_SLACK
 ```
 
 ### Infrastructure Principles
@@ -254,25 +255,25 @@ Kubeon establishes an explicit security boundary between raw cluster telemetry a
 ```mermaid
 flowchart LR
     subgraph UNTRUSTED["Untrusted Source Data"]
-        K8S_RAW["Kubernetes Telemetry<br/>• Pod Env Vars & Secret refs<br/>• Container crash logs<br/>• Warning Event messages<br/>• Tool query outputs"]
+        K8S_RAW["Kubernetes Telemetry<br/>- Pod Env Vars and Secret refs<br/>- Container crash logs<br/>- Warning Event messages<br/>- Tool query outputs"]
     end
 
     subgraph PERIMETER["Kubeon SensitiveDataRedactor Perimeter"]
-        PATTERNS["Boundary Pattern Filter:<br/>1. Private Keys (PEM / OpenSSH)<br/>2. Database URIs (password masking)<br/>3. Authorization Headers (Bearer/Basic)<br/>4. JWT & ServiceAccount Tokens<br/>5. Cloud API Keys (AIza..., ghp_..., AKIA...)<br/>6. Key-Value Credentials (password=..., etc.)<br/>7. Benign Value Allowlist Protection"]
+        PATTERNS["Boundary Pattern Filter:<br/>1. Private Keys: PEM, OpenSSH<br/>2. Database URIs: password masking<br/>3. Authorization Headers: Bearer, Basic<br/>4. JWT and ServiceAccount Tokens<br/>5. Cloud API Keys: Google, GitHub, AWS<br/>6. Key-Value Credentials: password, token<br/>7. Benign Value Allowlist Protection"]
     end
 
-    subgraph TRUSTED["Sanitized Data Boundary (Zero Raw Credentials)"]
-        DEST_LLM["Google Gemini API<br/>(Prompt contains sanitized telemetry only)"]
-        DEST_DB[("PostgreSQL Database<br/>(Persisted EvidenceBundle & Issue sanitized)")]
-        DEST_SLACK["Slack Webhook<br/>(Alert payload sanitized before POST)"]
-        DEST_API["REST API Consumers<br/>(IncidentResponse DTOs sanitized)"]
+    subgraph TRUSTED["Sanitized Data Boundary - Zero Raw Credentials"]
+        DEST_LLM["Google Gemini API<br/>Prompt contains sanitized telemetry only"]
+        DEST_DB[("PostgreSQL Database<br/>Persisted EvidenceBundle and Issue sanitized")]
+        DEST_SLACK["Slack Webhook<br/>Alert payload sanitized before POST"]
+        DEST_API["REST API Consumers<br/>IncidentResponse DTOs sanitized"]
     end
 
-    K8S_RAW -->|Raw Text| PATTERNS
-    PATTERNS -->|Replaced with [REDACTED]| DEST_LLM
-    PATTERNS -->|Replaced with [REDACTED]| DEST_DB
-    PATTERNS -->|Replaced with [REDACTED]| DEST_SLACK
-    PATTERNS -->|Replaced with [REDACTED]| DEST_API
+    K8S_RAW -->|Raw Telemetry| PATTERNS
+    PATTERNS -->|Sanitized Telemetry| DEST_LLM
+    PATTERNS -->|Sanitized Records| DEST_DB
+    PATTERNS -->|Sanitized Alerts| DEST_SLACK
+    PATTERNS -->|Sanitized DTOs| DEST_API
 ```
 
 ### Data Safety Guarantees
